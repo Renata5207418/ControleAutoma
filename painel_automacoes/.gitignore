@@ -1,0 +1,12 @@
+# Arquivos de Rede Sensíveis
+config_vms.py
+nomes_vm.py
+
+# Ambientes Virtuais (AQUI ESTAVA O PROBLEMA)
+venv/
+.venv/
+env/
+
+# Cache e Senhas
+.env
+__pycache__/
