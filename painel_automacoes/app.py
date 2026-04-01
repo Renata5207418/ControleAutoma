@@ -189,17 +189,19 @@ def mostrar_manual_apps():
     todas_apps = sorted(list(set(todas_apps)))
 
     # --- INICIALIZAÇÃO DE ESTADOS ---
+    if 'app_selecionada' not in st.session_state: st.session_state.app_selecionada = todas_apps[0] if todas_apps else ""
     if 'editando_start' not in st.session_state: st.session_state.editando_start = False
     if 'editando_erro' not in st.session_state: st.session_state.editando_erro = False
     if 'search_input' not in st.session_state: st.session_state.search_input = ""
 
-    # --- CALLBACKS MÁGICOS (Transições Instantâneas) ---
+    # --- CALLBACKS ---
     def limpar_busca(): st.session_state.search_input = ""
-    
     def toggle_start(): st.session_state.editando_start = not st.session_state.editando_start
     def toggle_erro(): st.session_state.editando_erro = not st.session_state.editando_erro
-
-    def on_app_change():
+    
+    # Callback quando clica num botão de aplicação
+    def selecionar_app(app_name):
+        st.session_state.app_selecionada = app_name
         st.session_state.editando_start = False
         st.session_state.editando_erro = False
 
@@ -210,7 +212,7 @@ def mostrar_manual_apps():
         c.execute("INSERT OR REPLACE INTO manuals (app_name, how_to_start, error_guide) VALUES (?, ?, ?)", (app, novo_texto, erro_atual))
         conexao.commit()
         conexao.close()
-        st.session_state.editando_start = False # Desliga edição na hora
+        st.session_state.editando_start = False
 
     def salvar_erro_bd(app, start_atual):
         novo_erro = st.session_state.get(f"text_e_{app}", "")
@@ -219,36 +221,40 @@ def mostrar_manual_apps():
         c.execute("INSERT OR REPLACE INTO manuals (app_name, how_to_start, error_guide) VALUES (?, ?, ?)", (app, start_atual, novo_erro))
         conexao.commit()
         conexao.close()
-        st.session_state.editando_erro = False # Desliga edição na hora
+        st.session_state.editando_erro = False
 
-    # --- CSS NEON GHOST + ROLAGEM DO MODAL ---
+    # --- CSS NEON PARA OS BOTÕES ---
     st.markdown("""
         <style>
-            /* Barra de Rolagem no Modal inteiro */
-            div[data-testid="stDialog"] div[role="dialog"] {
-                overflow-y: auto !important;
-                max-height: 85vh !important;
-                overflow-x: hidden !important;
+            /* Design base para todos os botões não selecionados (Secundários) */
+            div[data-testid="stButton"] button[kind="secondary"] {
+                background: transparent !important;
+                border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                color: #e2e8f0 !important;
+                justify-content: flex-start !important; 
+                border-radius: 4px !important;
+            }
+            div[data-testid="stButton"] button[kind="secondary"]:hover {
+                border-color: rgba(57, 255, 20, 0.5) !important;
+                background: rgba(57, 255, 20, 0.05) !important;
             }
             
-            div[data-testid="stRadio"] div[role="radiogroup"] > label > div:first-child { display: none !important; }
-            div[data-testid="stRadio"] div[role="radiogroup"] > label {
-                background: transparent !important; border: 1px solid rgba(255, 255, 255, 0.1) !important;
-                padding: 10px 15px !important; border-radius: 4px !important;
-                margin-bottom: 5px !important; width: 100% !important; box-sizing: border-box !important;
-                transition: all 0.2s ease;
-            }
-            div[data-testid="stRadio"] div[role="radiogroup"] > label:hover {
-                border-color: rgba(57, 255, 20, 0.5) !important; background: rgba(57, 255, 20, 0.05) !important;
-            }
-            div[data-testid="stRadio"] div[role="radiogroup"] [aria-checked="true"] {
-                background: rgba(57, 255, 20, 0.1) !important; border: 2px solid #39ff14 !important;
+            /* Design para o botão SELECIONADO (Primário) */
+            div[data-testid="stButton"] button[kind="primary"] {
+                background: rgba(57, 255, 20, 0.1) !important;
+                border: 2px solid #39ff14 !important;
                 box-shadow: 0 0 10px rgba(57, 255, 20, 0.2) !important;
+                color: #39ff14 !important;
+                font-weight: bold !important;
+                justify-content: flex-start !important;
+                border-radius: 4px !important;
             }
-            div[data-testid="stRadio"] div[role="radiogroup"] [aria-checked="true"] p {
-                color: #39ff14 !important; font-weight: bold !important;
+
+            /* Centraliza apenas os botões de Lápis/Editar */
+            div[data-testid="stButton"] button[help^="Editar"] {
+                justify-content: center !important;
             }
-            .nav-container { max-height: 550px; overflow-y: auto; overflow-x: hidden; padding-right: 5px; }
+
             .target-header {
                 text-align: center; background: rgba(57, 255, 20, 0.05); border: 1px solid rgba(57, 255, 20, 0.2);
                 padding: 10px; border-radius: 8px; margin-bottom: 25px; color: #39ff14; font-family: monospace;
@@ -259,7 +265,7 @@ def mostrar_manual_apps():
 
     col_list, col_content = st.columns([1, 2.5], gap="large")
 
-    # --- COLUNA 1: NAVEGAÇÃO E FILTRO ---
+    # --- COLUNA 1: NAVEGAÇÃO COM BOTÕES ---
     with col_list:
         st.markdown("<p style='color: #64748b; font-size: 0.7rem; letter-spacing: 2px; font-weight: bold; margin-bottom: 10px;'>SEARCH_FILTER</p>", unsafe_allow_html=True)
         search_query = st.text_input("Filtrar...", placeholder="Digite e dê Enter...", key="search_input", label_visibility="collapsed")
@@ -273,71 +279,81 @@ def mostrar_manual_apps():
             st.error("NADA ENCONTRADO")
             return
         
-        st.markdown('<div class="nav-container">', unsafe_allow_html=True)
-        app_selecionada = st.radio("Selecione:", vms_filtradas, key="nav_manual_radio", label_visibility="collapsed", on_change=on_app_change)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+        
+        # A GAIOLA DA ESQUERDA: Prende os botões num espaço com scroll!
+        with st.container(height=550, border=False):
+            for app in vms_filtradas:
+                tipo_botao = "primary" if app == st.session_state.app_selecionada else "secondary"
+                st.button(
+                    app, 
+                    key=f"btn_{app}", 
+                    type=tipo_botao, 
+                    use_container_width=True, 
+                    on_click=selecionar_app, 
+                    args=(app,)
+                )
 
-    # Buscar dados ANTES de renderizar as caixas de edição (essencial para os Callbacks)
+    # Buscar dados da aplicação selecionada
+    app_atual = st.session_state.app_selecionada
     conn = sqlite3.connect('knowledge_base.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT how_to_start, error_guide FROM manuals WHERE app_name = ?", (app_selecionada,))
+    cursor.execute("SELECT how_to_start, error_guide FROM manuals WHERE app_name = ?", (app_atual,))
     result = cursor.fetchone()
     h_start, e_guide = (result[0], result[1]) if result else ("", "")
     conn.close()
 
     # --- COLUNA 2: CONTEÚDO ---
     with col_content:
-        st.markdown(f"<div class='target-header'>TARGET: {app_selecionada.upper()}</div>", unsafe_allow_html=True)
+        # A GAIOLA DA DIREITA: Prende o texto num espaço do exato mesmo tamanho da esquerda!
+        with st.container(height=550, border=False):
+            st.markdown(f"<div class='target-header'>TARGET: {app_atual.upper()}</div>", unsafe_allow_html=True)
 
-        c_init, c_err = st.columns(2, gap="medium")
+            c_init, c_err = st.columns(2, gap="medium")
 
-        # --- COLUNA INICIALIZAÇÃO ---
-        with c_init:
-            h_col1, h_col2 = st.columns([4, 1])
-            h_col1.markdown("<b style='color:#39ff14; font-size:0.8rem;'>🟢 START_PROTOCOL</b>", unsafe_allow_html=True)
-            
-            # Botão de Lápis sem "rerun" forçado, só inverte o estado
-            h_col2.button("", icon=":material/edit:", key=f"btn_edit_i_{app_selecionada}", help="Editar Inicialização", on_click=toggle_start)
-            st.markdown("<div style='height: 1px; background: #39ff14; opacity: 0.3; margin-bottom: 15px;'></div>", unsafe_allow_html=True)
-            
-            if st.session_state.editando_start:
-                st.text_area("Edit:", value=h_start, height=300, label_visibility="collapsed", key=f"text_i_{app_selecionada}")
-                # O botão SALVAR chama o callback e a UI reage instântaneamente
-                st.button("SALVAR START", use_container_width=True, on_click=salvar_start_bd, args=(app_selecionada, e_guide))
-            else:
-                if h_start:
-                    # O Truque: Troca o "Enter" por <br> pro Markdown não ler como título
-                    h_html = h_start.replace('\n', '<br>')
-                    st.markdown(f"""
-                        <div style="background: rgba(57, 255, 20, 0.05); border: 1px solid rgba(57, 255, 20, 0.2); 
-                                    padding: 15px; border-radius: 5px; color: #bdfcc9; font-size: 0.85rem; 
-                                    font-family: monospace;">{h_html}</div>
-                    """, unsafe_allow_html=True)
-                else: 
-                    st.markdown("<p style='color: #444; font-style: italic;'>No data...</p>", unsafe_allow_html=True)
+            # --- COLUNA INICIALIZAÇÃO ---
+            with c_init:
+                h_col1, h_col2 = st.columns([4, 1])
+                h_col1.markdown("<b style='color:#39ff14; font-size:0.8rem;'>🟢 START_PROTOCOL</b>", unsafe_allow_html=True)
+                
+                h_col2.button("", icon=":material/edit:", key=f"btn_edit_i_{app_atual}", help="Editar Inicialização", on_click=toggle_start)
+                st.markdown("<div style='height: 1px; background: #39ff14; opacity: 0.3; margin-bottom: 15px;'></div>", unsafe_allow_html=True)
+                
+                if st.session_state.editando_start:
+                    st.text_area("Edit:", value=h_start, height=300, label_visibility="collapsed", key=f"text_i_{app_atual}")
+                    st.button("SALVAR START", use_container_width=True, on_click=salvar_start_bd, args=(app_atual, e_guide))
+                else:
+                    if h_start:
+                        h_html = h_start.replace('\n', '<br>')
+                        st.markdown(f"""
+                            <div style="background: rgba(57, 255, 20, 0.05); border: 1px solid rgba(57, 255, 20, 0.2); 
+                                        padding: 15px; border-radius: 5px; color: #bdfcc9; font-size: 0.85rem; 
+                                        font-family: monospace;">{h_html}</div>
+                        """, unsafe_allow_html=True)
+                    else: 
+                        st.markdown("<p style='color: #444; font-style: italic;'>No data...</p>", unsafe_allow_html=True)
 
-        # --- COLUNA TROUBLESHOOTING ---
-        with c_err:
-            h_col1, h_col2 = st.columns([4, 1])
-            h_col1.markdown("<b style='color:#ff416c; font-size:0.8rem;'>🔴 ERROR_LOG_FIX</b>", unsafe_allow_html=True)
-            
-            h_col2.button("", icon=":material/edit:", key=f"btn_edit_e_{app_selecionada}", help="Editar Erros", on_click=toggle_erro)
-            st.markdown("<div style='height: 1px; background: #ff416c; opacity: 0.3; margin-bottom: 15px;'></div>", unsafe_allow_html=True)
-            
-            if st.session_state.editando_erro:
-                st.text_area("Edit:", value=e_guide, height=300, label_visibility="collapsed", key=f"text_e_{app_selecionada}")
-                st.button("SALVAR ERROS", use_container_width=True, on_click=salvar_erro_bd, args=(app_selecionada, h_start))
-            else:
-                if e_guide:
-                    # O mesmo truque para a coluna de erros
-                    e_html = e_guide.replace('\n', '<br>')
-                    st.markdown(f"""
-                        <div style="background: rgba(255, 65, 108, 0.05); border: 1px solid rgba(255, 65, 108, 0.2); 
-                                    padding: 15px; border-radius: 5px; color: #ffcbd1; font-size: 0.85rem; 
-                                    font-family: monospace;">{e_html}</div>
-                    """, unsafe_allow_html=True)
-                else: 
-                    st.markdown("<p style='color: #444; font-style: italic;'>No data...</p>", unsafe_allow_html=True)
+            # --- COLUNA TROUBLESHOOTING ---
+            with c_err:
+                h_col1, h_col2 = st.columns([4, 1])
+                h_col1.markdown("<b style='color:#ff416c; font-size:0.8rem;'>🔴 ERROR_LOG_FIX</b>", unsafe_allow_html=True)
+                
+                h_col2.button("", icon=":material/edit:", key=f"btn_edit_e_{app_atual}", help="Editar Erros", on_click=toggle_erro)
+                st.markdown("<div style='height: 1px; background: #ff416c; opacity: 0.3; margin-bottom: 15px;'></div>", unsafe_allow_html=True)
+                
+                if st.session_state.editando_erro:
+                    st.text_area("Edit:", value=e_guide, height=300, label_visibility="collapsed", key=f"text_e_{app_atual}")
+                    st.button("SALVAR ERROS", use_container_width=True, on_click=salvar_erro_bd, args=(app_atual, h_start))
+                else:
+                    if e_guide:
+                        e_html = e_guide.replace('\n', '<br>')
+                        st.markdown(f"""
+                            <div style="background: rgba(255, 65, 108, 0.05); border: 1px solid rgba(255, 65, 108, 0.2); 
+                                        padding: 15px; border-radius: 5px; color: #ffcbd1; font-size: 0.85rem; 
+                                        font-family: monospace;">{e_html}</div>
+                        """, unsafe_allow_html=True)
+                    else: 
+                        st.markdown("<p style='color: #444; font-style: italic;'>No data...</p>", unsafe_allow_html=True)
 
     conn.close()
 
