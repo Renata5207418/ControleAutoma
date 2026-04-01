@@ -188,123 +188,156 @@ def mostrar_manual_apps():
             todas_apps.append(app['nome'])
     todas_apps = sorted(list(set(todas_apps)))
 
-    # --- NOVO CSS ESTILO NEON GHOST ---
+    # --- INICIALIZAÇÃO DE ESTADOS ---
+    if 'editando_start' not in st.session_state: st.session_state.editando_start = False
+    if 'editando_erro' not in st.session_state: st.session_state.editando_erro = False
+    if 'search_input' not in st.session_state: st.session_state.search_input = ""
+
+    # --- CALLBACKS MÁGICOS (Transições Instantâneas) ---
+    def limpar_busca(): st.session_state.search_input = ""
+    
+    def toggle_start(): st.session_state.editando_start = not st.session_state.editando_start
+    def toggle_erro(): st.session_state.editando_erro = not st.session_state.editando_erro
+
+    def on_app_change():
+        st.session_state.editando_start = False
+        st.session_state.editando_erro = False
+
+    def salvar_start_bd(app, erro_atual):
+        novo_texto = st.session_state.get(f"text_i_{app}", "")
+        conexao = sqlite3.connect('knowledge_base.db')
+        c = conexao.cursor()
+        c.execute("INSERT OR REPLACE INTO manuals (app_name, how_to_start, error_guide) VALUES (?, ?, ?)", (app, novo_texto, erro_atual))
+        conexao.commit()
+        conexao.close()
+        st.session_state.editando_start = False # Desliga edição na hora
+
+    def salvar_erro_bd(app, start_atual):
+        novo_erro = st.session_state.get(f"text_e_{app}", "")
+        conexao = sqlite3.connect('knowledge_base.db')
+        c = conexao.cursor()
+        c.execute("INSERT OR REPLACE INTO manuals (app_name, how_to_start, error_guide) VALUES (?, ?, ?)", (app, start_atual, novo_erro))
+        conexao.commit()
+        conexao.close()
+        st.session_state.editando_erro = False # Desliga edição na hora
+
+    # --- CSS NEON GHOST + ROLAGEM DO MODAL ---
     st.markdown("""
         <style>
-            /* Esconde a bolinha do radio */
-            div[data-testid="stRadio"] div[role="radiogroup"] > label > div:first-child {
-                display: none !important;
+            /* Barra de Rolagem no Modal inteiro */
+            div[data-testid="stDialog"] div[role="dialog"] {
+                overflow-y: auto !important;
+                max-height: 85vh !important;
+                overflow-x: hidden !important;
             }
             
-            /* Retângulo Transparente por padrão */
+            div[data-testid="stRadio"] div[role="radiogroup"] > label > div:first-child { display: none !important; }
             div[data-testid="stRadio"] div[role="radiogroup"] > label {
-                background: transparent !important;
-                border: 1px solid rgba(255, 255, 255, 0.1) !important;
-                padding: 10px 15px !important;
-                border-radius: 4px !important;
-                margin-bottom: 6px !important;
-                width: 100%;
-                transition: all 0.2s ease-in-out;
-                cursor: pointer;
+                background: transparent !important; border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                padding: 10px 15px !important; border-radius: 4px !important;
+                margin-bottom: 5px !important; width: 100% !important; box-sizing: border-box !important;
+                transition: all 0.2s ease;
             }
-            
-            /* Efeito de Hover suave */
             div[data-testid="stRadio"] div[role="radiogroup"] > label:hover {
-                border-color: rgba(57, 255, 20, 0.5) !important;
-                background: rgba(57, 255, 20, 0.05) !important;
+                border-color: rgba(57, 255, 20, 0.5) !important; background: rgba(57, 255, 20, 0.05) !important;
             }
-            
-            /* ITEM SELECIONADO: Contorno Verde Neon e Fundo Verde Suave */
             div[data-testid="stRadio"] div[role="radiogroup"] [aria-checked="true"] {
-                background: rgba(57, 255, 20, 0.1) !important; /* Verde suave transparente */
-                border: 2px solid #39ff14 !important; /* Contorno Verde Neon */
-                box-shadow: 0 0 15px rgba(57, 255, 20, 0.2) !important; /* Brilho neon */
+                background: rgba(57, 255, 20, 0.1) !important; border: 2px solid #39ff14 !important;
+                box-shadow: 0 0 10px rgba(57, 255, 20, 0.2) !important;
             }
-
-            /* Cor do texto quando selecionado */
-            div[data-testid="stRadio"] div[role="radiogroup"] [aria-checked="true"] div[data-testid="stMarkdownContainer"] p {
-                color: #39ff14 !important;
-                font-weight: bold !important;
-                text-shadow: 0 0 5px rgba(57, 255, 20, 0.5);
+            div[data-testid="stRadio"] div[role="radiogroup"] [aria-checked="true"] p {
+                color: #39ff14 !important; font-weight: bold !important;
             }
-
-            .nav-container {
-                max-height: 550px;
-                overflow-y: auto;
-                padding-right: 10px;
+            .nav-container { max-height: 550px; overflow-y: auto; overflow-x: hidden; padding-right: 5px; }
+            .target-header {
+                text-align: center; background: rgba(57, 255, 20, 0.05); border: 1px solid rgba(57, 255, 20, 0.2);
+                padding: 10px; border-radius: 8px; margin-bottom: 25px; color: #39ff14; font-family: monospace;
+                letter-spacing: 5px; text-shadow: 0 0 8px rgba(57, 255, 20, 0.4);
             }
         </style>
     """, unsafe_allow_html=True)
 
-    col_list, col_init, col_err = st.columns([1, 1.5, 1.5], gap="medium")
+    col_list, col_content = st.columns([1, 2.5], gap="large")
 
-    # --- COLUNA 1: NAVEGAÇÃO ---
+    # --- COLUNA 1: NAVEGAÇÃO E FILTRO ---
     with col_list:
-        st.markdown("<p style='color: #64748b; font-size: 0.7rem; letter-spacing: 2px; font-weight: bold; margin-bottom: 10px;'>BUSCAR APLICAÇÃO</p>", unsafe_allow_html=True)
-        search_query = st.text_input("Filtrar...", placeholder="Digite o nome...", label_visibility="collapsed").lower()
-        vms_filtradas = [app for app in todas_apps if search_query in app.lower()]
+        st.markdown("<p style='color: #64748b; font-size: 0.7rem; letter-spacing: 2px; font-weight: bold; margin-bottom: 10px;'>SEARCH_FILTER</p>", unsafe_allow_html=True)
+        search_query = st.text_input("Filtrar...", placeholder="Digite e dê Enter...", key="search_input", label_visibility="collapsed")
+        
+        if search_query:
+            st.button("LIMPAR FILTRO", use_container_width=True, on_click=limpar_busca)
+
+        vms_filtradas = [app for app in todas_apps if search_query.lower() in app.lower()]
 
         if not vms_filtradas:
-            st.warning("Nada encontrado.")
-            app_selecionada = todas_apps[0]
-        else:
-            st.markdown('<div class="nav-container">', unsafe_allow_html=True)
-            app_selecionada = st.radio("Navegação", vms_filtradas, key="nav_manual_radio", label_visibility="collapsed")
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.error("NADA ENCONTRADO")
+            return
+        
+        st.markdown('<div class="nav-container">', unsafe_allow_html=True)
+        app_selecionada = st.radio("Selecione:", vms_filtradas, key="nav_manual_radio", label_visibility="collapsed", on_change=on_app_change)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    # Buscar dados no SQLite
+    # Buscar dados ANTES de renderizar as caixas de edição (essencial para os Callbacks)
     conn = sqlite3.connect('knowledge_base.db')
     cursor = conn.cursor()
     cursor.execute("SELECT how_to_start, error_guide FROM manuals WHERE app_name = ?", (app_selecionada,))
     result = cursor.fetchone()
-    h_start = result[0] if result else ""
-    e_guide = result[1] if result else ""
+    h_start, e_guide = (result[0], result[1]) if result else ("", "")
+    conn.close()
 
-    # --- COLUNA 2: INICIALIZAÇÃO ---
-    with col_init:
-        c1, c2 = st.columns([4, 1])
-        c1.markdown(f"<div style='color:#39ff14; font-weight:bold; font-size:0.9rem;'>🟢 INICIALIZAÇÃO</div>", unsafe_allow_html=True)
-        edit_init = c2.checkbox("✏️", key=f"edit_i_{app_selecionada}")
-        st.markdown("<div style='height: 2px; background: linear-gradient(90deg, #39ff14, transparent); margin-bottom: 15px;'></div>", unsafe_allow_html=True)
-        
-        if edit_init:
-            new_h = st.text_area("Editar Inicialização:", value=h_start, height=400, label_visibility="collapsed")
-            if st.button("SALVAR START", use_container_width=True):
-                cursor.execute("INSERT OR REPLACE INTO manuals (app_name, how_to_start, error_guide) VALUES (?, ?, ?)",
-                               (app_selecionada, new_h, e_guide))
-                conn.commit()
-                st.success("Salvo!")
-                st.rerun()
-        else:
-            if h_start:
-                st.code(h_start, language="bash")
+    # --- COLUNA 2: CONTEÚDO ---
+    with col_content:
+        st.markdown(f"<div class='target-header'>TARGET: {app_selecionada.upper()}</div>", unsafe_allow_html=True)
+
+        c_init, c_err = st.columns(2, gap="medium")
+
+        # --- COLUNA INICIALIZAÇÃO ---
+        with c_init:
+            h_col1, h_col2 = st.columns([4, 1])
+            h_col1.markdown("<b style='color:#39ff14; font-size:0.8rem;'>🟢 START_PROTOCOL</b>", unsafe_allow_html=True)
+            
+            # Botão de Lápis sem "rerun" forçado, só inverte o estado
+            h_col2.button("", icon=":material/edit:", key=f"btn_edit_i_{app_selecionada}", help="Editar Inicialização", on_click=toggle_start)
+            st.markdown("<div style='height: 1px; background: #39ff14; opacity: 0.3; margin-bottom: 15px;'></div>", unsafe_allow_html=True)
+            
+            if st.session_state.editando_start:
+                st.text_area("Edit:", value=h_start, height=300, label_visibility="collapsed", key=f"text_i_{app_selecionada}")
+                # O botão SALVAR chama o callback e a UI reage instântaneamente
+                st.button("SALVAR START", use_container_width=True, on_click=salvar_start_bd, args=(app_selecionada, e_guide))
             else:
-                st.markdown("<p style='color: #444; font-style: italic;'>Sem dados...</p>", unsafe_allow_html=True)
+                if h_start:
+                    # O Truque: Troca o "Enter" por <br> pro Markdown não ler como título
+                    h_html = h_start.replace('\n', '<br>')
+                    st.markdown(f"""
+                        <div style="background: rgba(57, 255, 20, 0.05); border: 1px solid rgba(57, 255, 20, 0.2); 
+                                    padding: 15px; border-radius: 5px; color: #bdfcc9; font-size: 0.85rem; 
+                                    font-family: monospace;">{h_html}</div>
+                    """, unsafe_allow_html=True)
+                else: 
+                    st.markdown("<p style='color: #444; font-style: italic;'>No data...</p>", unsafe_allow_html=True)
 
-    # --- COLUNA 3: TROUBLESHOOTING ---
-    with col_err:
-        c1, c2 = st.columns([4, 1])
-        c1.markdown(f"<div style='color:#ff416c; font-weight:bold; font-size:0.9rem;'>🔴 TROUBLESHOOTING</div>", unsafe_allow_html=True)
-        edit_err = c2.checkbox("✏️", key=f"edit_e_{app_selecionada}")
-        st.markdown("<div style='height: 2px; background: linear-gradient(90deg, #ff416c, transparent); margin-bottom: 15px;'></div>", unsafe_allow_html=True)
-
-        if edit_err:
-            new_e = st.text_area("Editar Erros:", value=e_guide, height=400, label_visibility="collapsed")
-            if st.button("SALVAR ERROS", use_container_width=True):
-                cursor.execute("INSERT OR REPLACE INTO manuals (app_name, how_to_start, error_guide) VALUES (?, ?, ?)",
-                               (app_selecionada, h_start, new_e))
-                conn.commit()
-                st.success("Salvo!")
-                st.rerun()
-        else:
-            if e_guide:
-                st.markdown(f"""
-                    <div style="background-color: rgba(255, 65, 108, 0.05); border: 1px solid rgba(255, 65, 108, 0.2); 
-                                padding: 15px; border-radius: 5px; color: #ffcbd1; font-size: 0.85rem; 
-                                white-space: pre-wrap; font-family: 'Courier New', Courier, monospace;">{e_guide}</div>
-                """, unsafe_allow_html=True)
+        # --- COLUNA TROUBLESHOOTING ---
+        with c_err:
+            h_col1, h_col2 = st.columns([4, 1])
+            h_col1.markdown("<b style='color:#ff416c; font-size:0.8rem;'>🔴 ERROR_LOG_FIX</b>", unsafe_allow_html=True)
+            
+            h_col2.button("", icon=":material/edit:", key=f"btn_edit_e_{app_selecionada}", help="Editar Erros", on_click=toggle_erro)
+            st.markdown("<div style='height: 1px; background: #ff416c; opacity: 0.3; margin-bottom: 15px;'></div>", unsafe_allow_html=True)
+            
+            if st.session_state.editando_erro:
+                st.text_area("Edit:", value=e_guide, height=300, label_visibility="collapsed", key=f"text_e_{app_selecionada}")
+                st.button("SALVAR ERROS", use_container_width=True, on_click=salvar_erro_bd, args=(app_selecionada, h_start))
             else:
-                st.markdown("<p style='color: #444; font-style: italic;'>Sem dados...</p>", unsafe_allow_html=True)
+                if e_guide:
+                    # O mesmo truque para a coluna de erros
+                    e_html = e_guide.replace('\n', '<br>')
+                    st.markdown(f"""
+                        <div style="background: rgba(255, 65, 108, 0.05); border: 1px solid rgba(255, 65, 108, 0.2); 
+                                    padding: 15px; border-radius: 5px; color: #ffcbd1; font-size: 0.85rem; 
+                                    font-family: monospace;">{e_html}</div>
+                    """, unsafe_allow_html=True)
+                else: 
+                    st.markdown("<p style='color: #444; font-style: italic;'>No data...</p>", unsafe_allow_html=True)
 
     conn.close()
 
