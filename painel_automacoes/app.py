@@ -178,54 +178,136 @@ def get_app_status(url):
     except:
         return None
 
-@st.dialog("Knowledge Base - Manuais de Operação")
+
+@st.dialog("DOCUMENTAÇÃO DAS APLICAÇÕES", width="large")
 def mostrar_manual_apps():
-    st.markdown("""
-        <div style='display: flex; align-items: center; gap: 12px; margin-bottom: 20px;'>
-            <img src='https://api.iconify.design/lucide/book-open.svg?color=%23fecc16' width='28'>
-            <h3 style='margin: 0; color: #fff;'>Repositório de Manuais</h3>
-        </div>
-    """, unsafe_allow_html=True)
-    
+    # 1. Preparar lista de Apps
     todas_apps = []
     for ip, info in VMS.items():
         for app in info['apps']:
             todas_apps.append(app['nome'])
-    
-    selected_app = st.selectbox("Selecione a Aplicação", sorted(list(set(todas_apps))))
-    
+    todas_apps = sorted(list(set(todas_apps)))
+
+    # --- NOVO CSS ESTILO NEON GHOST ---
+    st.markdown("""
+        <style>
+            /* Esconde a bolinha do radio */
+            div[data-testid="stRadio"] div[role="radiogroup"] > label > div:first-child {
+                display: none !important;
+            }
+            
+            /* Retângulo Transparente por padrão */
+            div[data-testid="stRadio"] div[role="radiogroup"] > label {
+                background: transparent !important;
+                border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                padding: 10px 15px !important;
+                border-radius: 4px !important;
+                margin-bottom: 6px !important;
+                width: 100%;
+                transition: all 0.2s ease-in-out;
+                cursor: pointer;
+            }
+            
+            /* Efeito de Hover suave */
+            div[data-testid="stRadio"] div[role="radiogroup"] > label:hover {
+                border-color: rgba(57, 255, 20, 0.5) !important;
+                background: rgba(57, 255, 20, 0.05) !important;
+            }
+            
+            /* ITEM SELECIONADO: Contorno Verde Neon e Fundo Verde Suave */
+            div[data-testid="stRadio"] div[role="radiogroup"] [aria-checked="true"] {
+                background: rgba(57, 255, 20, 0.1) !important; /* Verde suave transparente */
+                border: 2px solid #39ff14 !important; /* Contorno Verde Neon */
+                box-shadow: 0 0 15px rgba(57, 255, 20, 0.2) !important; /* Brilho neon */
+            }
+
+            /* Cor do texto quando selecionado */
+            div[data-testid="stRadio"] div[role="radiogroup"] [aria-checked="true"] div[data-testid="stMarkdownContainer"] p {
+                color: #39ff14 !important;
+                font-weight: bold !important;
+                text-shadow: 0 0 5px rgba(57, 255, 20, 0.5);
+            }
+
+            .nav-container {
+                max-height: 550px;
+                overflow-y: auto;
+                padding-right: 10px;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+    col_list, col_init, col_err = st.columns([1, 1.5, 1.5], gap="medium")
+
+    # --- COLUNA 1: NAVEGAÇÃO ---
+    with col_list:
+        st.markdown("<p style='color: #64748b; font-size: 0.7rem; letter-spacing: 2px; font-weight: bold; margin-bottom: 10px;'>BUSCAR APLICAÇÃO</p>", unsafe_allow_html=True)
+        search_query = st.text_input("Filtrar...", placeholder="Digite o nome...", label_visibility="collapsed").lower()
+        vms_filtradas = [app for app in todas_apps if search_query in app.lower()]
+
+        if not vms_filtradas:
+            st.warning("Nada encontrado.")
+            app_selecionada = todas_apps[0]
+        else:
+            st.markdown('<div class="nav-container">', unsafe_allow_html=True)
+            app_selecionada = st.radio("Navegação", vms_filtradas, key="nav_manual_radio", label_visibility="collapsed")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    # Buscar dados no SQLite
     conn = sqlite3.connect('knowledge_base.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT how_to_start, error_guide FROM manuals WHERE app_name = ?", (selected_app,))
+    cursor.execute("SELECT how_to_start, error_guide FROM manuals WHERE app_name = ?", (app_selecionada,))
     result = cursor.fetchone()
-    
     h_start = result[0] if result else ""
     e_guide = result[1] if result else ""
 
-    tab1, tab2, tab3 = st.tabs(["📖 Ver Manual", "📝 Editar Inicialização", "🛠 Editar Erros"])
-    
-    with tab1:
-        st.markdown(f"<div style='display:flex; align-items:center; gap:8px; margin:15px 0;'><img src='https://api.iconify.design/lucide/play.svg?color=%2339ff14' width='18'><b style='color:#39ff14;'>COMO INICIALIZAR</b></div>", unsafe_allow_html=True)
-        st.info(h_start if h_start else "Nenhuma instrução cadastrada.")
-        st.markdown(f"<div style='display:flex; align-items:center; gap:8px; margin:15px 0;'><img src='https://api.iconify.design/lucide/alert-triangle.svg?color=%23ff416c' width='18'><b style='color:#ff416c;'>GUIA DE SOLUÇÃO DE ERROS</b></div>", unsafe_allow_html=True)
-        st.warning(e_guide if e_guide else "Nenhum guia de erro cadastrado.")
+    # --- COLUNA 2: INICIALIZAÇÃO ---
+    with col_init:
+        c1, c2 = st.columns([4, 1])
+        c1.markdown(f"<div style='color:#39ff14; font-weight:bold; font-size:0.9rem;'>🟢 INICIALIZAÇÃO</div>", unsafe_allow_html=True)
+        edit_init = c2.checkbox("✏️", key=f"edit_i_{app_selecionada}")
+        st.markdown("<div style='height: 2px; background: linear-gradient(90deg, #39ff14, transparent); margin-bottom: 15px;'></div>", unsafe_allow_html=True)
+        
+        if edit_init:
+            new_h = st.text_area("Editar Inicialização:", value=h_start, height=400, label_visibility="collapsed")
+            if st.button("SALVAR START", use_container_width=True):
+                cursor.execute("INSERT OR REPLACE INTO manuals (app_name, how_to_start, error_guide) VALUES (?, ?, ?)",
+                               (app_selecionada, new_h, e_guide))
+                conn.commit()
+                st.success("Salvo!")
+                st.rerun()
+        else:
+            if h_start:
+                st.code(h_start, language="bash")
+            else:
+                st.markdown("<p style='color: #444; font-style: italic;'>Sem dados...</p>", unsafe_allow_html=True)
 
-    with tab2:
-        new_start = st.text_area("Passo a passo para ligar:", value=h_start, height=250, key="edit_start")
-        if st.button("SALVAR INICIALIZAÇÃO", use_container_width=True):
-            cursor.execute("INSERT OR REPLACE INTO manuals (app_name, how_to_start, error_guide) VALUES (?, ?, ?)",
-                           (selected_app, new_start, e_guide))
-            conn.commit()
-            st.success("Manual de inicialização atualizado!")
+    # --- COLUNA 3: TROUBLESHOOTING ---
+    with col_err:
+        c1, c2 = st.columns([4, 1])
+        c1.markdown(f"<div style='color:#ff416c; font-weight:bold; font-size:0.9rem;'>🔴 TROUBLESHOOTING</div>", unsafe_allow_html=True)
+        edit_err = c2.checkbox("✏️", key=f"edit_e_{app_selecionada}")
+        st.markdown("<div style='height: 2px; background: linear-gradient(90deg, #ff416c, transparent); margin-bottom: 15px;'></div>", unsafe_allow_html=True)
 
-    with tab3:
-        new_guide = st.text_area("Solução de problemas comuns:", value=e_guide, height=250, key="edit_err")
-        if st.button("SALVAR GUIA DE ERROS", use_container_width=True):
-            cursor.execute("INSERT OR REPLACE INTO manuals (app_name, how_to_start, error_guide) VALUES (?, ?, ?)",
-                           (selected_app, h_start, new_guide))
-            conn.commit()
-            st.success("Guia de erros atualizado!")
+        if edit_err:
+            new_e = st.text_area("Editar Erros:", value=e_guide, height=400, label_visibility="collapsed")
+            if st.button("SALVAR ERROS", use_container_width=True):
+                cursor.execute("INSERT OR REPLACE INTO manuals (app_name, how_to_start, error_guide) VALUES (?, ?, ?)",
+                               (app_selecionada, h_start, new_e))
+                conn.commit()
+                st.success("Salvo!")
+                st.rerun()
+        else:
+            if e_guide:
+                st.markdown(f"""
+                    <div style="background-color: rgba(255, 65, 108, 0.05); border: 1px solid rgba(255, 65, 108, 0.2); 
+                                padding: 15px; border-radius: 5px; color: #ffcbd1; font-size: 0.85rem; 
+                                white-space: pre-wrap; font-family: 'Courier New', Courier, monospace;">{e_guide}</div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("<p style='color: #444; font-style: italic;'>Sem dados...</p>", unsafe_allow_html=True)
+
     conn.close()
+
 
 def verificar_alerta_apps(apps):
     for app in apps:

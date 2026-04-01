@@ -10,3 +10,5 @@ env/
 # Cache e Senhas
 .env
 __pycache__/
+
+knowledge_base.db
