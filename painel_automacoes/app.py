@@ -3,12 +3,13 @@ import requests
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import concurrent.futures
 from nomes_vm import NOMES_VMS
 from config_vms import VMS, get_all_vms, query_prom
 import streamlit.components.v1 as components
 
 # 1. Configurações da página
-st.set_page_config(page_title="Ops Command Center", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Ops Command Center", page_icon="https://api.iconify.design/lucide/terminal.svg", layout="wide", initial_sidebar_state="collapsed")
 
 # ==============================================================================
 # --- BANCO DE DADOS: KNOWLEDGE BASE ---
@@ -29,7 +30,7 @@ def init_db():
 init_db()
 
 # ==============================================================================
-# --- JAVASCRIPT: CHUVA MATRIX ---
+# --- JAVASCRIPT: CHUVA MATRIX & AUTO-SYNC ---
 # ==============================================================================
 matrix_rain_code = """
 <script>
@@ -82,6 +83,16 @@ matrix_rain_code = """
 </script>
 """
 components.html(matrix_rain_code, height=0, width=0)
+
+auto_sync_code = """
+<script>
+    // Auto-sync a cada 30 minutos (1.800.000 ms)
+    setTimeout(function() {
+        window.parent.location.reload();
+    }, 1800000); 
+</script>
+"""
+components.html(auto_sync_code, height=0, width=0)
 
 # ==============================================================================
 # --- CSS CUSTOMIZADO ---
@@ -168,16 +179,32 @@ css = """
 st.markdown(css, unsafe_allow_html=True)
 
 # ==============================================================================
-# --- PERFORMANCE & MODAIS ---
+# --- PERFORMANCE & MODAIS (COM REQUISIÇÕES CONCORRENTES BALANCEADAS) ---
 # ==============================================================================
 @st.cache_data(ttl=30)
-def get_app_status(url):
-    try:
-        r = requests.get(url, timeout=1.5)
-        return r.json()
-    except:
-        return None
+def get_all_apps_status(urls):
+    """Busca o status limitando a concorrência e reaproveitando conexões."""
+    results = {}
+    
+    # Session reaproveita conexões TCP, aliviando as VMs
+    session = requests.Session()
+    
+    def fetch(url):
+        try:
+            # Timeout aumentado para 5s para tolerar filas em APIs single-thread
+            r = session.get(url, timeout=5)
+            return url, r.json()
+        except:
+            return url, None
 
+    # Reduzido para 5 workers. Evita afogar VMs com múltiplas portas
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_url = {executor.submit(fetch, url): url for url in urls}
+        for future in concurrent.futures.as_completed(future_to_url):
+            url, data = future.result()
+            results[url] = data
+            
+    return results
 
 @st.dialog("DOCUMENTAÇÃO DAS APLICAÇÕES", width="large")
 def mostrar_manual_apps():
@@ -357,19 +384,18 @@ def mostrar_manual_apps():
 
     conn.close()
 
-
-def verificar_alerta_apps(apps):
+def verificar_alerta_apps(apps, app_statuses):
     for app in apps:
-        if get_app_status(app["url"]) is None:
+        if app_statuses.get(app["url"]) is None:
             return True 
     return False
 
 @st.dialog("Detalhes das Aplicacoes")
-def mostrar_detalhes_apps(vm_ip, apps):
+def mostrar_detalhes_apps(vm_ip, apps, app_statuses):
     st.markdown(f"<div style='display: flex; align-items: center; gap: 10px; color: #fff; margin-bottom: 20px;'><img src='https://api.iconify.design/lucide/satellite-dish.svg?color=%234facfe' width='20'> <b>IP DA MAQUINA:</b> <code style='color: #00f2fe; background: transparent;'>{vm_ip}</code></div>", unsafe_allow_html=True)
     html = "<div class='tech-container'>"
     for app in apps:
-        r = get_app_status(app["url"])
+        r = app_statuses.get(app["url"])
         if r:
             is_run = r.get("is_running", False)
             status = "RUNNING" if is_run else "STOPPED"
@@ -400,12 +426,10 @@ with col1:
 """, unsafe_allow_html=True)
 
 with col2:
-    # Usando o ícone nativo do Streamlit para manter o alinhamento perfeito
     if st.button('MANUAL APPS', icon=":material/menu_book:", use_container_width=True):
         mostrar_manual_apps()
 
 with col3:
-    # Coloquei o ícone de refresh aqui também para ficar o par perfeito
     if st.button('ATUALIZAR', icon=":material/refresh:", use_container_width=True): 
         st.rerun()
     st.markdown(f"<div style='text-align: center; color: #6b7280; font-size: 0.50rem; font-family: monospace; margin-top: 5px;'>Last update: {datetime.now().strftime('%H:%M:%S')}</div>", unsafe_allow_html=True)
@@ -413,9 +437,26 @@ with col3:
 st.divider()
 
 # ==============================================================================
-# --- GRID VMS ---
+# --- FETCH CENTRALIZADO DE APPS (CONCORRENTE BALANCEADO) ---
 # ==============================================================================
 vms_list = get_all_vms()
+
+# Coleta todas as URLs disponíveis antes de montar o grid
+todas_urls_apps = []
+if vms_list:
+    for vm_addr in vms_list:
+        ip = vm_addr.split(':')[0]
+        config = VMS.get(ip, {"apps": []})
+        for app in config["apps"]:
+            todas_urls_apps.append(app["url"])
+
+# Realiza o fetch balanceado e deixa guardado no cache para este ciclo
+status_global_apps = get_all_apps_status(tuple(todas_urls_apps))
+
+
+# ==============================================================================
+# --- GRID VMS ---
+# ==============================================================================
 if not vms_list:
     st.error("NENHUMA VM DETECTADA")
 else:
@@ -427,7 +468,7 @@ else:
         with cols[i % 3]:
             with st.container(border=True):
                 is_up = query_prom(f'up{{instance="{vm_addr}"}}') == 1.0
-                has_alert = verificar_alerta_apps(config["apps"]) if (is_up and config["apps"]) else False
+                has_alert = verificar_alerta_apps(config["apps"], status_global_apps) if (is_up and config["apps"]) else False
                 status_color = "%2339ff14" if is_up else "%23ff416c"
                 alert_html = f"<img src='https://api.iconify.design/lucide/triangle-alert.svg?color=%23ff416c' width='24' style='animation: blink 1s infinite;'>" if has_alert else ""
                 
@@ -452,9 +493,7 @@ else:
 
                     if config["apps"]:
                         btn_text = f"VERIFICAR ERRO [{len(config['apps'])}]" if has_alert else f"ABRIR CONSOLE [{len(config['apps'])}]"
-                        if st.button(btn_text, key=f"btn_{ip}", use_container_width=True): mostrar_detalhes_apps(ip, config["apps"])
+                        if st.button(btn_text, key=f"btn_{ip}", use_container_width=True): mostrar_detalhes_apps(ip, config["apps"], status_global_apps)
                 else:
                     st.error("VM OFFLINE")
-
-
-# streamlit run app.py
+                    
